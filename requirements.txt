@@ -1,0 +1,8 @@
+discord.py==2.4.0
+yt-dlp>=2024.10.22
+python-dotenv==1.0.1
+audioop-lts==0.2.1; python_version >= "3.13"
+requests>=2.31.0
+instaloader>=4.13
+praw>=7.7.1
+

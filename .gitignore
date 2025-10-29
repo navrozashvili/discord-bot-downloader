@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Env/venv
+.env
+.venv/
+
+# OS
+.DS_Store
+
+# App
+instagram_cookies.txt
