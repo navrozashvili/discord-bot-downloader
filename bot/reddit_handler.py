@@ -2,8 +2,9 @@
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, List
 import tempfile
+from urllib.parse import urlparse
 import requests
 
 try:
@@ -18,15 +19,16 @@ logger = logging.getLogger(__name__)
 class RedditPost:
     """Represents a Reddit post with its content."""
     
-    def __init__(self, title: str, author: str, subreddit: str, 
+    def __init__(self, title: str, author: str, subreddit: str,
                  text: Optional[str] = None, image_urls: Optional[List[str]] = None,
-                 url: Optional[str] = None):
+                 url: Optional[str] = None, video_url: Optional[str] = None):
         self.title = title
         self.author = author
         self.subreddit = subreddit
         self.text = text
         self.image_urls = image_urls or []
         self.url = url
+        self.video_url = video_url
 
 
 class RedditHandler:
@@ -59,12 +61,43 @@ class RedditHandler:
                           "Get credentials from https://www.reddit.com/prefs/apps")
     
     def extract_post_id(self, url: str) -> Optional[str]:
-        """Extract post ID from Reddit URL."""
-        # Match patterns like: /comments/POST_ID/...
-        match = re.search(r'/comments/([a-z0-9]+)', url, re.IGNORECASE)
+        """Extract post ID from Reddit URL.
+
+        Supports canonical URLs, share URLs, and redd.it short links.
+        """
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        path = parsed.path
+
+        # Canonical Reddit URLs: /r/<sub>/comments/<id>/... or /comments/<id>/...
+        match = re.search(r'/comments/([a-z0-9]+)', path, re.IGNORECASE)
         if match:
             return match.group(1)
+
+        # redd.it short links: https://redd.it/<id>
+        if host.endswith('redd.it'):
+            short_id = path.strip('/').split('/', 1)[0]
+            if re.fullmatch(r'[a-z0-9]+', short_id, re.IGNORECASE):
+                return short_id
+
         return None
+
+    def _resolve_reddit_share_url(self, url: str) -> str:
+        """Resolve Reddit share URLs (e.g. /r/<sub>/s/<token>) to canonical URLs."""
+        try:
+            response = requests.get(
+                url,
+                headers={'User-Agent': 'discord-meme-bot/1.0'},
+                allow_redirects=True,
+                timeout=10,
+            )
+            resolved_url = response.url or url
+            if resolved_url != url:
+                logger.info(f"Resolved Reddit URL: {url} -> {resolved_url}")
+            return resolved_url
+        except Exception as e:
+            logger.warning(f"Failed to resolve Reddit URL {url}: {type(e).__name__}: {e}")
+            return url
     
     def fetch_post(self, url: str) -> Optional[RedditPost]:
         """Fetch Reddit post information using PRAW."""
@@ -74,12 +107,18 @@ class RedditHandler:
         
         try:
             post_id = self.extract_post_id(url)
+
+            # Handle share-style URLs that don't include the post id directly.
             if not post_id:
-                logger.warning(f"Could not extract post ID from {url}")
-                return None
-            
-            # Fetch submission using PRAW
-            submission = self.reddit.submission(id=post_id)
+                url = self._resolve_reddit_share_url(url)
+                post_id = self.extract_post_id(url)
+
+            # Fetch submission using ID when available, fallback to URL lookup.
+            if post_id:
+                submission = self.reddit.submission(id=post_id)
+            else:
+                logger.info(f"Falling back to PRAW URL lookup for {url}")
+                submission = self.reddit.submission(url=url)
             
             # Get post text (if it's a text post)
             text = None
@@ -89,20 +128,28 @@ class RedditHandler:
                 if len(submission.selftext) > 2000:
                     text += "..."
             
-            # Get images
+            # Get images / video
             image_urls = []
-            
-            # Check if post has an image
-            if hasattr(submission, 'post_hint') and submission.post_hint == 'image':
+            video_url = None
+
+            canonical_url = f"https://www.reddit.com{submission.permalink}" if getattr(submission, 'permalink', None) else url
+
+            # Check for native Reddit-hosted video posts
+            if getattr(submission, 'is_video', False):
+                # Prefer canonical post URL; yt-dlp can extract and merge audio/video from it.
+                video_url = canonical_url or submission.url or url
+
+            # Check if post has a direct image
+            elif hasattr(submission, 'post_hint') and submission.post_hint == 'image':
                 image_urls.append(submission.url)
-            
+
             # Check for gallery posts
             elif hasattr(submission, 'is_gallery') and submission.is_gallery:
                 if hasattr(submission, 'media_metadata'):
                     gallery_data = submission.gallery_data
                     items = gallery_data.get('items', [])
                     media_metadata = submission.media_metadata
-                    
+
                     for item in items:
                         media_id = item['media_id']
                         if media_id in media_metadata:
@@ -115,23 +162,24 @@ class RedditHandler:
                                 elif 'gif' in media_info['s']:
                                     image_url = media_info['s']['gif'].replace('&amp;', '&')
                                     image_urls.append(image_url)
-            
-            # Check for preview images if no other images found
-            elif not image_urls and hasattr(submission, 'preview'):
+
+            # Check for preview images if no other media found
+            elif not image_urls and not video_url and hasattr(submission, 'preview'):
                 preview = submission.preview
                 if 'images' in preview and preview['images']:
                     source = preview['images'][0].get('source', {})
                     if 'url' in source:
                         image_url = source['url'].replace('&amp;', '&')
                         image_urls.append(image_url)
-            
+
             return RedditPost(
                 title=submission.title,
                 author=submission.author.name if submission.author else '[deleted]',
                 subreddit=submission.subreddit.display_name,
                 text=text,
                 image_urls=image_urls,
-                url=url
+                url=canonical_url,
+                video_url=video_url
             )
             
         except Exception as e:

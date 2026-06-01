@@ -9,5 +9,8 @@ __pycache__/
 # OS
 .DS_Store
 
+# Logs
+*.log
+
 # App
 instagram_cookies.txt

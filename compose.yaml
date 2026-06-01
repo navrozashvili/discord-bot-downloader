@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    container_name: discord-bot-downloader
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./cookies.txt:/app/cookies.txt:ro

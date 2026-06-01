@@ -245,28 +245,38 @@ class VideoDownloader:
     
     def _try_download_video(self, url: str, output_template: str) -> Optional[Tuple[Path, str]]:
         """Try to download content as video."""
-        
-        # Try multiple format strategies, from smallest to largest
-        # This helps us stay under the file size limit
-        format_strategies = [
-            # Strategy 1: Smallest reasonable quality
-            "worst[ext=mp4][filesize<{}]/worst[ext=mp4]/worst".format(
-                self.max_file_size_bytes
-            ),
-            # Strategy 2: Medium quality with size limit
-            "best[height<=480][ext=mp4][filesize<{}]/best[height<=480][ext=mp4]".format(
-                self.max_file_size_bytes
-            ),
-            # Strategy 3: Good quality with size limit
-            "best[height<=720][ext=mp4][filesize<{}]/best[height<=720][ext=mp4]".format(
-                self.max_file_size_bytes
-            ),
-            # Strategy 4: Best available that fits
-            "best[filesize<{}]/best[ext=mp4]/best".format(
-                self.max_file_size_bytes
-            ),
-        ]
-        
+
+        is_reddit = 'reddit.com' in url or 'redd.it' in url
+
+        # Reddit commonly uses separate video/audio streams. Use a Reddit-specific
+        # selector first, then generic fallbacks.
+        if is_reddit:
+            format_strategies = [
+                "bestvideo*+bestaudio/bestvideo+bestaudio/best",
+                "best",
+            ]
+        else:
+            # Try multiple format strategies, from smallest to largest
+            # This helps us stay under the file size limit
+            format_strategies = [
+                # Strategy 1: Smallest reasonable quality
+                "worst[ext=mp4][filesize<{}]/worst[ext=mp4]/worst".format(
+                    self.max_file_size_bytes
+                ),
+                # Strategy 2: Medium quality with size limit
+                "best[height<=480][ext=mp4][filesize<{}]/best[height<=480][ext=mp4]".format(
+                    self.max_file_size_bytes
+                ),
+                # Strategy 3: Good quality with size limit
+                "best[height<=720][ext=mp4][filesize<{}]/best[height<=720][ext=mp4]".format(
+                    self.max_file_size_bytes
+                ),
+                # Strategy 4: Best available that fits
+                "best[filesize<{}]/best[ext=mp4]/best".format(
+                    self.max_file_size_bytes
+                ),
+            ]
+
         for format_selector in format_strategies:
             ydl_opts = {
                 'format': format_selector,
@@ -276,41 +286,58 @@ class VideoDownloader:
                 'extract_flat': False,
                 'socket_timeout': 30,
                 'retries': 3,
+                'no_playlist': True,
                 # Prefer mp4 container
                 'merge_output_format': 'mp4',
-                # Don't download if over size limit
-                'max_filesize': self.max_file_size_bytes,
-                # Better user agent for Instagram
+                # Better user agent for Instagram/reddit pages
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Sec-Fetch-Mode': 'navigate',
-                }
+                },
             }
-            
+
+            # Keep strict max_filesize for non-Reddit. For Reddit, many formats don't
+            # expose deterministic filesize in selectors, so enforce size after download.
+            if not is_reddit:
+                ydl_opts['max_filesize'] = self.max_file_size_bytes
+
             # Add cookies if available (needed for Instagram)
             if self.cookies_file and os.path.exists(self.cookies_file):
                 ydl_opts['cookiefile'] = self.cookies_file
                 logger.debug(f"Using cookies from {self.cookies_file}")
-            
+
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                     if not info:
                         continue
-                    
-                    # Get the downloaded file path
+
+                    filepath: Optional[Path] = None
+
+                    # Prefer requested_downloads path when available.
                     if 'requested_downloads' in info and info['requested_downloads']:
-                        filepath = Path(info['requested_downloads'][0]['filepath'])
-                    else:
-                        # Fallback: construct path from info
+                        maybe = info['requested_downloads'][0].get('filepath')
+                        if maybe:
+                            filepath = Path(maybe)
+
+                    # Fallback to yt-dlp merged filename.
+                    if (not filepath or not filepath.exists()) and info.get('_filename'):
+                        maybe = Path(info['_filename'])
+                        if maybe.exists():
+                            filepath = maybe
+
+                    # Final fallback: construct path from info id/ext.
+                    if not filepath or not filepath.exists():
                         video_id = info.get('id', 'video')
                         ext = info.get('ext', 'mp4')
-                        filepath = self.temp_dir / f"{video_id}.{ext}"
-                    
+                        maybe = self.temp_dir / f"{video_id}.{ext}"
+                        if maybe.exists():
+                            filepath = maybe
+
                     # Check if file exists and is within size limit
-                    if filepath.exists():
+                    if filepath and filepath.exists():
                         file_size = filepath.stat().st_size
                         if file_size <= self.max_file_size_bytes:
                             title = info.get('title', 'Video')
@@ -319,25 +346,23 @@ class VideoDownloader:
                             # File too large, clean up and try next strategy
                             filepath.unlink(missing_ok=True)
                             continue
-            
+
             except yt_dlp.utils.DownloadError as e:
                 # Try next format strategy
                 error_msg = str(e).lower()
                 logger.debug(f"Video download error for {url}: {error_msg}")
-                
+
                 # If it's a private video or login required, don't retry
                 if 'private' in error_msg or 'login' in error_msg or 'unavailable' in error_msg:
                     logger.info(f"Content unavailable or requires login: {url}")
                     return None
-                
-                # For "unable to extract video url", continue trying other strategies
-                # If all fail, the caller will try as image
+
                 continue
             except Exception as e:
                 # Try next strategy
                 logger.debug(f"Exception downloading {url}: {type(e).__name__}: {str(e)}")
                 continue
-        
+
         # All video download strategies failed
         return None
     

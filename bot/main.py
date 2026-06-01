@@ -34,7 +34,10 @@ YOUTUBE_SHORTS_PATTERN = re.compile(
     re.IGNORECASE
 )
 REDDIT_PATTERN = re.compile(
-    r'https?://(?:www\.|old\.|new\.)?reddit\.com/r/[^/]+/comments/[^\s]+',
+    r'https?://(?:'
+    r'(?:(?:www\.|old\.|new\.)?reddit\.com/(?:(?:r/[^/\s]+/(?:comments|s)/[^\s]+)|comments/[^\s]+))'
+    r'|(?:www\.)?redd\.it/[^\s]+'
+    r')',
     re.IGNORECASE
 )
 
@@ -61,6 +64,8 @@ class MemeBot(commands.Bot):
             client_secret=config.reddit_client_secret
         )
         self.semaphore = asyncio.Semaphore(config.concurrency)
+        self._recent_urls: dict[str, float] = {}  # url -> timestamp for dedup
+        self._dedup_ttl = 60.0  # seconds to ignore duplicate URLs
     
     async def setup_hook(self):
         """Called when the bot is starting up."""
@@ -87,8 +92,17 @@ class MemeBot(commands.Bot):
         if not urls:
             return
         
-        # Process each URL
+        # Process each URL (with dedup)
+        import time
+        now = time.monotonic()
+        # Cleanup old entries
+        self._recent_urls = {u: t for u, t in self._recent_urls.items() if now - t < self._dedup_ttl}
+        
         for url in urls:
+            if url in self._recent_urls:
+                logger.info(f"Skipping duplicate URL (seen {now - self._recent_urls[url]:.1f}s ago): {url}")
+                continue
+            self._recent_urls[url] = now
             await self._process_video_url(message, url)
     
     def _extract_video_urls(self, content: str) -> list[str]:
@@ -172,7 +186,7 @@ class MemeBot(commands.Bot):
     ):
         """Upload media (prefer channel webhook) and delete original message."""
         file = discord.File(str(filepath), filename=filepath.name)
-        content = f"**{title}**"
+        content = None
         sent_via_webhook = False
 
         # Try webhook if configured for the channel
@@ -223,29 +237,47 @@ class MemeBot(commands.Bot):
         
         async with self.semaphore:
             downloaded_images = []
+            downloaded_video: Optional[Path] = None
             try:
                 logger.info(f"Fetching Reddit post from {url}")
-                
+
                 # Fetch post in executor to avoid blocking
                 loop = asyncio.get_event_loop()
                 post = await loop.run_in_executor(None, self.reddit_handler.fetch_post, url)
-                
+
                 if post is None:
                     await self._handle_download_failure(message, url, "Could not fetch Reddit post")
                     return
-                
+
+                # If Reddit post is a video, try downloading/reuploading video directly.
+                if post.video_url:
+                    logger.info(f"Downloading Reddit video from {post.video_url}")
+                    result = await self.downloader.download(post.video_url)
+                    if result is not None:
+                        downloaded_video, _ = result
+                        await self._upload_and_replace(
+                            message,
+                            downloaded_video,
+                            post.title,
+                            post.video_url,
+                        )
+                        return
+                    logger.warning(
+                        f"Could not download Reddit video for {post.video_url}; falling back to embed"
+                    )
+
                 # Download images if any
                 if post.image_urls:
                     downloaded_images = await loop.run_in_executor(
                         None, self.reddit_handler.download_images, post
                     )
-                
+
                 # Create Discord embed
                 embed = discord.Embed(
                     title=post.title[:256],  # Discord title limit
                     description=post.text[:4096] if post.text else None,  # Discord description limit
                     color=discord.Color.orange(),
-                    url=url
+                    url=post.url or url
                 )
                 
                 embed.set_author(name=f"r/{post.subreddit} • u/{post.author}")
@@ -254,11 +286,13 @@ class MemeBot(commands.Bot):
                 files = []
                 if downloaded_images:
                     for idx, img_path in enumerate(downloaded_images):
-                        file = discord.File(str(img_path), filename=f"image_{idx}.{img_path.suffix}")
+                        ext = img_path.suffix.lstrip('.') or 'jpg'
+                        filename = f"image_{idx}.{ext}"
+                        file = discord.File(str(img_path), filename=filename)
                         files.append(file)
                         # Set first image as embed image
                         if idx == 0:
-                            embed.set_image(url=f"attachment://image_{idx}.{img_path.suffix}")
+                            embed.set_image(url=f"attachment://{filename}")
                 
                 # Send embed with images (prefer webhook)
                 sent_via_webhook = False
@@ -311,9 +345,11 @@ class MemeBot(commands.Bot):
                 logger.error(f"Error processing Reddit post {url}: {e}", exc_info=True)
                 await self._handle_download_failure(message, url)
             finally:
-                # Cleanup downloaded images
+                # Cleanup downloaded images/video
                 for img_path in downloaded_images:
                     self.reddit_handler.cleanup(img_path)
+                if downloaded_video:
+                    self.downloader.cleanup(downloaded_video)
     
     async def _handle_download_failure(
         self, 
