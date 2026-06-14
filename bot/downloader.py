@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class VideoDownloader:
-    """Downloads videos and images from TikTok, Instagram, and YouTube using yt-dlp."""
+    """Downloads videos and images from supported social platforms using yt-dlp."""
     
     def __init__(self, max_file_size_bytes: int, cookies_file: str = None):
         self.max_file_size_bytes = max_file_size_bytes
@@ -247,6 +247,7 @@ class VideoDownloader:
         """Try to download content as video."""
 
         is_reddit = 'reddit.com' in url or 'redd.it' in url
+        is_facebook = 'facebook.com' in url or 'fb.watch' in url
 
         # Reddit commonly uses separate video/audio streams. Use a Reddit-specific
         # selector first, then generic fallbacks.
@@ -289,7 +290,7 @@ class VideoDownloader:
                 'no_playlist': True,
                 # Prefer mp4 container
                 'merge_output_format': 'mp4',
-                # Better user agent for Instagram/reddit pages
+                # Better user agent for social pages that block default clients.
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -303,8 +304,11 @@ class VideoDownloader:
             if not is_reddit:
                 ydl_opts['max_filesize'] = self.max_file_size_bytes
 
-            # Add cookies if available (needed for Instagram)
-            if self.cookies_file and os.path.exists(self.cookies_file):
+            if is_facebook:
+                ydl_opts['http_headers']['Referer'] = 'https://www.facebook.com/'
+
+            # Add cookies if available (needed for some Instagram/Facebook content)
+            if self.cookies_file and os.path.isfile(self.cookies_file):
                 ydl_opts['cookiefile'] = self.cookies_file
                 logger.debug(f"Using cookies from {self.cookies_file}")
 
@@ -373,4 +377,3 @@ class VideoDownloader:
                 filepath.unlink()
         except Exception:
             pass
-

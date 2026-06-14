@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# URL patterns for TikTok, Instagram, YouTube Shorts, and Reddit
+# URL patterns for TikTok, Instagram, YouTube Shorts, Reddit, and Facebook
 TIKTOK_PATTERN = re.compile(
     r'https?://(?:(?:www|vm|vt)\.)?tiktok\.com/[^\s]+',
     re.IGNORECASE
@@ -40,12 +40,21 @@ REDDIT_PATTERN = re.compile(
     r')',
     re.IGNORECASE
 )
+FACEBOOK_PATTERN = re.compile(
+    r'https?://(?:'
+    r'(?:[a-z0-9-]+\.)?facebook\.com/(?:'
+    r'reel/|watch/?\?|watch/|share/|story\.php|video\.php|[^/\s<>()]+/videos?/'
+    r')[^\s<>()]*'
+    r'|(?:www\.)?fb\.watch/[^\s<>()]+'
+    r')',
+    re.IGNORECASE
+)
 
 
 class MemeBot(commands.Bot):
     """Discord bot that replaces social media links with uploaded media.
     
-    Supports: TikTok, Instagram (posts/reels), YouTube Shorts, and Reddit posts.
+    Supports: TikTok, Instagram (posts/reels), YouTube Shorts, Reddit posts, and Facebook videos.
     """
     
     def __init__(self):
@@ -106,7 +115,7 @@ class MemeBot(commands.Bot):
             await self._process_video_url(message, url)
     
     def _extract_video_urls(self, content: str) -> list[str]:
-        """Extract TikTok, Instagram, YouTube Shorts, and Reddit URLs from message content."""
+        """Extract supported video/post URLs from message content."""
         urls = []
         
         # Find TikTok URLs
@@ -124,6 +133,10 @@ class MemeBot(commands.Bot):
         # Find Reddit URLs
         reddit_matches = REDDIT_PATTERN.findall(content)
         urls.extend(reddit_matches)
+
+        # Find Facebook video/reel/share URLs
+        facebook_matches = FACEBOOK_PATTERN.findall(content)
+        urls.extend(facebook_matches)
         
         return urls
     
@@ -392,4 +405,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

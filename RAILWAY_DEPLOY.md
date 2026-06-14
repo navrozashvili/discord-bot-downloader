@@ -60,6 +60,11 @@ REDDIT_CLIENT_ID=your_reddit_client_id
 REDDIT_CLIENT_SECRET=your_reddit_client_secret
 ```
 
+**Optional variable (for login-gated Instagram/Facebook content):**
+```
+COOKIES_FILE=instagram_cookies.txt
+```
+
 ### 4. Deploy & Monitor
 
 1. Railway will automatically build and deploy
@@ -153,4 +158,3 @@ If you encounter issues:
 4. Review README.md for bot configuration details
 
 Happy hosting! 🚀
-

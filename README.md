@@ -1,10 +1,10 @@
 # Discord Meme Bot
 
-A Python Discord bot that automatically replaces TikTok, Instagram, YouTube Shorts, and Reddit links with uploaded media and formatted posts, so users don't need to leave Discord to view content.
+A Python Discord bot that automatically replaces TikTok, Instagram, YouTube Shorts, Reddit, and Facebook links with uploaded media and formatted posts, so users don't need to leave Discord to view content.
 
 ## Features
 
-- 🎬 Automatically detects TikTok, Instagram (Reels & Posts), YouTube Shorts, and Reddit post links
+- 🎬 Automatically detects TikTok, Instagram (Reels & Posts), YouTube Shorts, Reddit post links, and Facebook video links
 - 📥 Downloads videos and photos using yt-dlp and instaloader with smart quality selection
 - 📱 Formats Reddit posts with embeds showing title, text, and images
 - 🔄 Replaces the original message with uploaded media or formatted content
@@ -20,8 +20,9 @@ A Python Discord bot that automatically replaces TikTok, Instagram, YouTube Shor
 - ✅ Instagram Posts - videos and photos (instagram.com/p)
 - ✅ YouTube Shorts (youtube.com/shorts, youtu.be)
 - ✅ Reddit Posts (reddit.com/r/.../comments/...) - requires API credentials
+- ✅ Facebook Videos/Reels (facebook.com/watch, facebook.com/reel, facebook.com/share, fb.watch)
 
-**Note:** Private or login-gated content will be skipped gracefully.
+**Note:** Private or login-gated content will be skipped gracefully unless a valid cookies file is configured.
 
 ## Quick Start (Local)
 
@@ -180,6 +181,7 @@ Railway is a simple, managed platform that makes it easy to deploy and host your
 | `ALLOWED_CHANNEL_IDS` | Comma-separated channel IDs where bot works | All channels |
 | `MAX_FILE_SIZE_MB` | Maximum video file size in MB | 24 |
 | `CONCURRENCY` | Max simultaneous downloads | 2 |
+| `COOKIES_FILE` | Optional cookies file for Instagram/Facebook login-gated content | `instagram_cookies.txt` |
 | `REDDIT_CLIENT_ID` | Reddit API client ID (see [Reddit Setup](#reddit-setup-optional)) | Optional |
 | `REDDIT_CLIENT_SECRET` | Reddit API client secret | Optional |
 
@@ -207,13 +209,14 @@ To enable Reddit support, you need to create a Reddit app:
 
 ## Usage
 
-Simply post a TikTok, Instagram, YouTube Shorts, or Reddit link in one of your configured channels:
+Simply post a TikTok, Instagram, YouTube Shorts, Reddit, or Facebook link in one of your configured channels:
 
 ```
 https://www.tiktok.com/@user/video/1234567890
 https://www.instagram.com/reel/ABC123xyz/
 https://www.youtube.com/shorts/jNQXAC9IVRw
 https://www.reddit.com/r/pics/comments/abc123/cool_photo/
+https://www.facebook.com/reel/1234567890
 ```
 
 The bot will:

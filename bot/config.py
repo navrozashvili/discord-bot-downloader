@@ -35,7 +35,7 @@ class Config:
         # Concurrency limit
         self.concurrency = int(os.getenv("CONCURRENCY", "2"))
         
-        # Instagram cookies file (optional, for private/login-required content)
+        # Cookies file (optional, for private/login-required Instagram/Facebook content)
         self.cookies_file = os.getenv("COOKIES_FILE", "instagram_cookies.txt")
         
         # Reddit API credentials (optional, for Reddit support)
@@ -75,4 +75,3 @@ class Config:
 
 # Global config instance
 config = Config()
-
