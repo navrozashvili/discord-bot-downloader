@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
@@ -119,7 +120,11 @@ class VideoDownloader:
                     
                     # Check size
                     if filepath.stat().st_size > self.max_file_size_bytes:
-                        logger.warning(f"Instagram video exceeds size limit")
+                        logger.warning("Instagram video exceeds size limit; trying compression")
+                        compressed = self._compress_video(filepath)
+                        if compressed:
+                            title = post.caption[:100] if post.caption else "Instagram Video"
+                            return (compressed, title)
                         filepath.unlink(missing_ok=True)
                         return None
                     
@@ -347,6 +352,11 @@ class VideoDownloader:
                             title = info.get('title', 'Video')
                             return (filepath, title)
                         else:
+                            compressed = self._compress_video(filepath)
+                            if compressed:
+                                title = info.get('title', 'Video')
+                                return (compressed, title)
+
                             # File too large, clean up and try next strategy
                             filepath.unlink(missing_ok=True)
                             continue
@@ -369,6 +379,159 @@ class VideoDownloader:
 
         # All video download strategies failed
         return None
+
+    def _compress_video(self, filepath: Path) -> Optional[Path]:
+        """Compress a downloaded video so it fits within the configured size cap."""
+        if not filepath.exists():
+            return None
+
+        input_size = filepath.stat().st_size
+        if input_size <= self.max_file_size_bytes:
+            return filepath
+
+        duration = self._probe_duration_seconds(filepath)
+        if not duration:
+            logger.warning(f"Could not probe duration for {filepath.name}; skipping compression")
+            return None
+
+        target_total_bps = int((self.max_file_size_bytes * 8 * 0.88) / duration)
+        if target_total_bps < 180_000:
+            logger.warning(
+                f"Video {filepath.name} is too long to compress under size limit "
+                f"at usable quality"
+            )
+            return None
+
+        attempts = [
+            (720, 96_000, 1.00),
+            (540, 80_000, 0.90),
+            (480, 64_000, 0.80),
+            (360, 48_000, 0.65),
+        ]
+
+        for max_height, audio_bps, video_factor in attempts:
+            video_bps = int((target_total_bps - audio_bps) * video_factor)
+            if video_bps < 120_000:
+                continue
+
+            output = filepath.with_name(
+                f"{filepath.stem}_compressed_{max_height}p{filepath.suffix or '.mp4'}"
+            )
+            output.unlink(missing_ok=True)
+
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(filepath),
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
+                "-vf",
+                f"scale=-2:{max_height}",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-b:v",
+                str(video_bps),
+                "-maxrate",
+                str(int(video_bps * 1.25)),
+                "-bufsize",
+                str(int(video_bps * 2)),
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                str(audio_bps),
+                "-movflags",
+                "+faststart",
+                str(output),
+            ]
+
+            try:
+                logger.info(
+                    f"Compressing {filepath.name} to <= "
+                    f"{self.max_file_size_bytes / (1024 * 1024):.0f} MB "
+                    f"({max_height}p, {video_bps // 1000}k video)"
+                )
+                completed = subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=180,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as e:
+                logger.warning(f"Video compression failed for {filepath.name}: {e}")
+                output.unlink(missing_ok=True)
+                continue
+
+            if completed.returncode != 0:
+                logger.debug(
+                    f"ffmpeg failed for {filepath.name}: {completed.stderr[-1000:]}"
+                )
+                output.unlink(missing_ok=True)
+                continue
+
+            if output.exists() and output.stat().st_size <= self.max_file_size_bytes:
+                compressed_size = output.stat().st_size / (1024 * 1024)
+                original_size = input_size / (1024 * 1024)
+                logger.info(
+                    f"Compressed {filepath.name}: {original_size:.2f} MB -> "
+                    f"{compressed_size:.2f} MB"
+                )
+                filepath.unlink(missing_ok=True)
+                return output
+
+            if output.exists():
+                logger.warning(
+                    f"Compressed file still exceeds size limit: "
+                    f"{output.stat().st_size / (1024 * 1024):.2f} MB"
+                )
+                output.unlink(missing_ok=True)
+
+        logger.warning(f"Could not compress {filepath.name} under size limit")
+        return None
+
+    def _probe_duration_seconds(self, filepath: Path) -> Optional[float]:
+        """Return video duration using ffprobe."""
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(filepath),
+        ]
+
+        try:
+            completed = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.debug(f"ffprobe failed for {filepath.name}: {e}")
+            return None
+
+        if completed.returncode != 0:
+            return None
+
+        try:
+            duration = float(completed.stdout.strip())
+        except ValueError:
+            return None
+
+        return duration if duration > 0 else None
     
     def cleanup(self, filepath: Path) -> None:
         """Delete downloaded file."""
