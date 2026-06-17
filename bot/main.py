@@ -198,9 +198,11 @@ class MemeBot(commands.Bot):
         source_url: str
     ):
         """Upload media (prefer channel webhook) and delete original message."""
-        file = discord.File(str(filepath), filename=filepath.name)
         content = None
         sent_via_webhook = False
+
+        def make_file() -> discord.File:
+            return discord.File(str(filepath), filename=filepath.name)
 
         # Try webhook if configured for the channel
         webhook_url = config.webhook_url_for_channel(message.channel.id)
@@ -210,7 +212,7 @@ class MemeBot(commands.Bot):
                     webhook = discord.Webhook.from_url(webhook_url, session=session)
                     await webhook.send(
                         content=content,
-                        file=file,
+                        file=make_file(),
                         username=message.author.display_name,
                         avatar_url=message.author.display_avatar.url,
                         allowed_mentions=discord.AllowedMentions.none(),
@@ -226,7 +228,7 @@ class MemeBot(commands.Bot):
         if not sent_via_webhook:
             await message.channel.send(
                 content=content,
-                file=file,
+                file=make_file(),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             logger.info(f"Uploaded media for message {message.id}")

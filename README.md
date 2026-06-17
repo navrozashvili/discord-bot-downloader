@@ -69,7 +69,7 @@ Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH.
    ```env
    DISCORD_TOKEN=your_bot_token_here
    ALLOWED_CHANNEL_IDS=123456789012345678,987654321098765432
-   MAX_FILE_SIZE_MB=24
+   MAX_FILE_SIZE_MB=10
    CONCURRENCY=2
    ```
 
@@ -152,7 +152,7 @@ Railway is a simple, managed platform that makes it easy to deploy and host your
      ```
      DISCORD_TOKEN=your_bot_token_here
      ALLOWED_CHANNEL_IDS=123456789,987654321
-     MAX_FILE_SIZE_MB=24
+     MAX_FILE_SIZE_MB=10
      CONCURRENCY=2
      ```
    - Optional (for Reddit support):
@@ -179,7 +179,7 @@ Railway is a simple, managed platform that makes it easy to deploy and host your
 |----------|-------------|---------|
 | `DISCORD_TOKEN` | Your bot token from Discord Developer Portal | Required |
 | `ALLOWED_CHANNEL_IDS` | Comma-separated channel IDs where bot works | All channels |
-| `MAX_FILE_SIZE_MB` | Maximum video file size in MB | 24 |
+| `MAX_FILE_SIZE_MB` | Maximum video file size in MB | 10 |
 | `CONCURRENCY` | Max simultaneous downloads | 2 |
 | `COOKIES_FILE` | Optional cookies file for Instagram/Facebook login-gated content | `instagram_cookies.txt` |
 | `REDDIT_CLIENT_ID` | Reddit API client ID (see [Reddit Setup](#reddit-setup-optional)) | Optional |

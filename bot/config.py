@@ -29,7 +29,7 @@ class Config:
                 raise ValueError("ALLOWED_CHANNEL_IDS must be comma-separated integers")
         
         # Max file size in bytes
-        max_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", "24"))
+        max_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
         self.max_file_size_bytes = max_size_mb * 1024 * 1024
         
         # Concurrency limit
